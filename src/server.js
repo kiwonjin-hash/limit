@@ -1,0 +1,252 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const IDENTITY_FILE = path.join(DATA_DIR, 'identity-map.json');
+const RESTRICTION_FILE = path.join(DATA_DIR, 'restriction-map.json');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+const corsOptions = {
+  origin: ['https://yeouidogold.com', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
+app.use(express.json());
+
+// 임시 메모리 저장소
+const identityMap = new Map();     // key: memberHash
+const restrictionMap = new Map();  // key: memberHash 또는 uid:{memberUid}
+
+async function ensureDataDir() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+}
+
+async function loadMapFromFile(filePath, targetMap) {
+  try {
+    await ensureDataDir();
+    const raw = await fs.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    targetMap.clear();
+    Object.entries(parsed).forEach(([key, value]) => {
+      targetMap.set(key, value);
+    });
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.error(`loadMapFromFile error (${filePath}):`, error);
+    }
+  }
+}
+
+async function saveMapToFile(filePath, sourceMap) {
+  try {
+    await ensureDataDir();
+    const plainObject = Object.fromEntries(sourceMap);
+    await fs.writeFile(filePath, JSON.stringify(plainObject, null, 2), 'utf8');
+  } catch (error) {
+    console.error(`saveMapToFile error (${filePath}):`, error);
+  }
+}
+
+async function bootstrapData() {
+  await loadMapFromFile(IDENTITY_FILE, identityMap);
+  await loadMapFromFile(RESTRICTION_FILE, restrictionMap);
+}
+
+function now() {
+  return Date.now();
+}
+
+function makeUidKey(memberUid) {
+  return `uid:${memberUid}`;
+}
+
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true });
+});
+
+app.post('/api/test', (req, res) => {
+  res.json({
+    ok: true,
+    message: 'POST works',
+    body: req.body
+  });
+});
+
+/**
+ * 1) 로그인 회원 식별값 수집
+ */
+app.post('/api/imweb/collect-identity', async (req, res) => {
+  try {
+    const { memberHash, memberUid } = req.body || {};
+
+    if (!memberHash) {
+      return res.status(400).json({
+        ok: false,
+        message: 'memberHash required'
+      });
+    }
+
+    const prev = identityMap.get(memberHash);
+
+    identityMap.set(memberHash, {
+      memberHash,
+      memberUid: memberUid || prev?.memberUid || '',
+      firstSeenAt: prev?.firstSeenAt || now(),
+      lastSeenAt: now()
+    });
+
+    await saveMapToFile(IDENTITY_FILE, identityMap);
+
+    return res.json({
+      ok: true,
+      saved: identityMap.get(memberHash)
+    });
+  } catch (error) {
+    console.error('collect-identity error:', error);
+    return res.status(500).json({
+      ok: false,
+      message: 'server error'
+    });
+  }
+});
+
+/**
+ * 2) 관리자용 제한 등록
+ */
+app.post('/api/imweb/set-restriction', async (req, res) => {
+  try {
+    const {
+      adminSecret,
+      memberHash,
+      memberUid,
+      reason,
+      blockPurchase,
+      blockPickup,
+      isActive
+    } = req.body || {};
+
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+      return res.status(403).json({
+        ok: false,
+        message: 'forbidden'
+      });
+    }
+
+    if (!memberHash && !memberUid) {
+      return res.status(400).json({
+        ok: false,
+        message: 'memberHash or memberUid required'
+      });
+    }
+
+    const record = {
+      memberHash: memberHash || '',
+      memberUid: memberUid || '',
+      reason: reason || '',
+      blockPurchase: !!blockPurchase,
+      blockPickup: !!blockPickup,
+      isActive: isActive !== false,
+      updatedAt: now()
+    };
+
+    if (memberHash) {
+      restrictionMap.set(memberHash, record);
+    }
+
+    if (memberUid) {
+      restrictionMap.set(makeUidKey(memberUid), record);
+    }
+
+    await saveMapToFile(RESTRICTION_FILE, restrictionMap);
+
+    return res.json({
+      ok: true,
+      saved: record
+    });
+  } catch (error) {
+    console.error('set-restriction error:', error);
+    return res.status(500).json({
+      ok: false,
+      message: 'server error'
+    });
+  }
+});
+
+/**
+ * 3) 프론트에서 제한 여부 조회
+ */
+app.post('/api/imweb/check-restriction', (req, res) => {
+  try {
+    const { memberHash, memberUid } = req.body || {};
+
+    let found = null;
+
+    if (memberHash && restrictionMap.has(memberHash)) {
+      found = restrictionMap.get(memberHash);
+    }
+
+    if (!found && memberUid && restrictionMap.has(makeUidKey(memberUid))) {
+      found = restrictionMap.get(makeUidKey(memberUid));
+    }
+
+    if (!found || found.isActive === false) {
+      return res.json({
+        blocked: false,
+        blockPurchase: false,
+        blockPickup: false,
+        reason: ''
+      });
+    }
+
+    return res.json({
+      blocked: !!(found.blockPurchase || found.blockPickup),
+      blockPurchase: !!found.blockPurchase,
+      blockPickup: !!found.blockPickup,
+      reason: found.reason || ''
+    });
+  } catch (error) {
+    console.error('check-restriction error:', error);
+    return res.status(500).json({
+      blocked: false,
+      blockPurchase: false,
+      blockPickup: false,
+      reason: ''
+    });
+  }
+});
+
+/**
+ * 디버그용: 현재 메모리 상태 확인
+ */
+app.get('/api/imweb/debug/state', (req, res) => {
+  res.json({
+    ok: true,
+    identityMap: Object.fromEntries(identityMap),
+    restrictionMap: Object.fromEntries(restrictionMap)
+  });
+});
+
+bootstrapData()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server listening on port ${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error('bootstrapData error:', error);
+    process.exit(1);
+  });
