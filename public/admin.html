@@ -1,0 +1,237 @@
+
+
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>제한 등록 관리자</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 24px;
+      background: #111;
+      color: #fff;
+    }
+
+    h1, h2 {
+      margin: 0 0 12px;
+    }
+
+    input, button, textarea {
+      padding: 10px;
+      margin: 6px 0;
+      width: 100%;
+      box-sizing: border-box;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #181818;
+      color: #fff;
+    }
+
+    button {
+      cursor: pointer;
+      background: #2b2b2b;
+    }
+
+    button:hover {
+      background: #3a3a3a;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .card {
+      border: 1px solid #333;
+      padding: 16px;
+      border-radius: 12px;
+      margin-top: 16px;
+      background: #1a1a1a;
+    }
+
+    .small {
+      font-size: 12px;
+      color: #aaa;
+    }
+
+    .list-item {
+      border-top: 1px solid #333;
+      padding: 12px 0;
+    }
+
+    label {
+      display: block;
+      margin-top: 8px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .muted {
+      color: #bbb;
+    }
+
+    @media (max-width: 900px) {
+      .row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>제한 등록 관리자</h1>
+
+  <div class="card">
+    <label>관리자 비밀번호</label>
+    <input id="adminSecret" type="password" placeholder="ADMIN_SECRET 입력" />
+
+    <label>검색</label>
+    <input id="searchKeyword" type="text" placeholder="이메일 / 해시 / 사유 검색" />
+
+    <div class="actions">
+      <button id="searchBtn">검색</button>
+      <button id="loadBtn">전체 불러오기</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>제한 등록 / 수정</h2>
+
+      <label>memberHash</label>
+      <input id="memberHash" type="text" placeholder="해시 입력" />
+
+      <label>memberUid</label>
+      <input id="memberUid" type="text" placeholder="이메일 입력" />
+
+      <label>사유</label>
+      <textarea id="reason" rows="4" placeholder="예: 반복 취소, 방문수령 미수령"></textarea>
+
+      <label><input id="blockPurchase" type="checkbox" style="width:auto; margin-right:8px;" /> 구매 제한</label>
+      <label><input id="blockPickup" type="checkbox" style="width:auto; margin-right:8px;" /> 방문수령 제한</label>
+      <label><input id="isActive" type="checkbox" style="width:auto; margin-right:8px;" checked /> 활성화</label>
+
+      <div class="actions">
+        <button id="saveBtn">저장</button>
+        <button id="clearBtn">입력 초기화</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>검색 결과</h2>
+      <div id="results" class="small muted">아직 데이터 없음</div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = location.origin;
+
+    function el(id) {
+      return document.getElementById(id);
+    }
+
+    function getSecret() {
+      return el('adminSecret').value.trim();
+    }
+
+    function fillForm(item) {
+      el('memberHash').value = item.memberHash || '';
+      el('memberUid').value = item.memberUid || '';
+      el('reason').value = item.reason || '';
+      el('blockPurchase').checked = !!item.blockPurchase;
+      el('blockPickup').checked = !!item.blockPickup;
+      el('isActive').checked = item.isActive !== false;
+    }
+
+    async function loadAll() {
+      const res = await fetch(API_BASE + '/api/imweb/admin/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminSecret: getSecret() })
+      });
+      const data = await res.json();
+      renderResults(data);
+    }
+
+    async function search() {
+      const res = await fetch(API_BASE + '/api/imweb/admin/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminSecret: getSecret(),
+          keyword: el('searchKeyword').value.trim()
+        })
+      });
+      const data = await res.json();
+      renderResults(data);
+    }
+
+    async function saveRestriction() {
+      const res = await fetch(API_BASE + '/api/imweb/set-restriction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminSecret: getSecret(),
+          memberHash: el('memberHash').value.trim(),
+          memberUid: el('memberUid').value.trim(),
+          reason: el('reason').value.trim(),
+          blockPurchase: el('blockPurchase').checked,
+          blockPickup: el('blockPickup').checked,
+          isActive: el('isActive').checked
+        })
+      });
+      const data = await res.json();
+      alert(data.ok ? '저장 완료' : '저장 실패');
+      if (data.ok) loadAll();
+    }
+
+    function renderResults(data) {
+      const root = el('results');
+
+      if (!data.ok) {
+        root.innerHTML = '<div class="small">조회 실패</div>';
+        return;
+      }
+
+      const identities = data.identities || [];
+      const restrictions = data.restrictions || [];
+
+      root.innerHTML = `
+        <div class="small">identities: ${identities.length} / restrictions: ${restrictions.length}</div>
+        ${restrictions.map(item => `
+          <div class="list-item">
+            <div><strong>${item.memberUid || '(uid 없음)'}</strong></div>
+            <div class="small">${item.memberHash || ''}</div>
+            <div class="small">구매제한: ${!!item.blockPurchase} / 방문수령제한: ${!!item.blockPickup}</div>
+            <div class="small">사유: ${item.reason || ''}</div>
+            <button type="button" onclick='window.__fill(${JSON.stringify(item)})'>불러오기</button>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    window.__fill = fillForm;
+
+    el('searchBtn').addEventListener('click', search);
+    el('loadBtn').addEventListener('click', loadAll);
+    el('saveBtn').addEventListener('click', saveRestriction);
+    el('clearBtn').addEventListener('click', () => {
+      fillForm({
+        memberHash: '',
+        memberUid: '',
+        reason: '',
+        blockPurchase: false,
+        blockPickup: false,
+        isActive: true
+      });
+    });
+  </script>
+</body>
+</html>

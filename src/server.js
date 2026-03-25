@@ -12,6 +12,7 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const IDENTITY_FILE = path.join(DATA_DIR, 'identity-map.json');
 const RESTRICTION_FILE = path.join(DATA_DIR, 'restriction-map.json');
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +27,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json());
+app.use(express.static(PUBLIC_DIR));
 
 // 임시 메모리 저장소
 const identityMap = new Map();     // key: memberHash
@@ -76,6 +78,14 @@ function makeUidKey(memberUid) {
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
+});
+
+app.get('/', (req, res) => {
+  res.redirect('/admin');
+});
+
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
 });
 
 app.post('/api/test', (req, res) => {
@@ -226,6 +236,61 @@ app.post('/api/imweb/check-restriction', (req, res) => {
       blockPickup: false,
       reason: ''
     });
+  }
+});
+
+app.post('/api/imweb/admin/list', (req, res) => {
+  try {
+    const { adminSecret } = req.body || {};
+
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+      return res.status(403).json({ ok: false, message: 'forbidden' });
+    }
+
+    return res.json({
+      ok: true,
+      identities: Object.values(Object.fromEntries(identityMap)),
+      restrictions: Object.values(Object.fromEntries(restrictionMap))
+    });
+  } catch (error) {
+    console.error('admin/list error:', error);
+    return res.status(500).json({ ok: false, message: 'server error' });
+  }
+});
+
+app.post('/api/imweb/admin/search', (req, res) => {
+  try {
+    const { adminSecret, keyword } = req.body || {};
+
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+      return res.status(403).json({ ok: false, message: 'forbidden' });
+    }
+
+    const q = String(keyword || '').trim().toLowerCase();
+
+    const identities = Object.values(Object.fromEntries(identityMap)).filter(item => {
+      return (
+        (item.memberHash || '').toLowerCase().includes(q) ||
+        (item.memberUid || '').toLowerCase().includes(q)
+      );
+    });
+
+    const restrictions = Object.values(Object.fromEntries(restrictionMap)).filter(item => {
+      return (
+        (item.memberHash || '').toLowerCase().includes(q) ||
+        (item.memberUid || '').toLowerCase().includes(q) ||
+        (item.reason || '').toLowerCase().includes(q)
+      );
+    });
+
+    return res.json({
+      ok: true,
+      identities,
+      restrictions
+    });
+  } catch (error) {
+    console.error('admin/search error:', error);
+    return res.status(500).json({ ok: false, message: 'server error' });
   }
 });
 
