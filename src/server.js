@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
 import path from 'path';
+import admin from 'firebase-admin';
 import { fileURLToPath } from 'url';
 
 dotenv.config();
@@ -13,6 +14,10 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const IDENTITY_FILE = path.join(DATA_DIR, 'identity-map.json');
 const RESTRICTION_FILE = path.join(DATA_DIR, 'restriction-map.json');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || '';
+const FIREBASE_CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL || '';
+const FIREBASE_PRIVATE_KEY = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,6 +37,32 @@ app.use(express.static(PUBLIC_DIR));
 // 임시 메모리 저장소
 const identityMap = new Map();     // key: memberHash
 const restrictionMap = new Map();  // key: memberHash 또는 uid:{memberUid}
+
+let firestore = null;
+let identityCollection = null;
+let restrictionCollection = null;
+
+function initFirestore() {
+  if (!FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL || !FIREBASE_PRIVATE_KEY) {
+    console.log('Firestore disabled: missing Firebase env vars');
+    return;
+  }
+
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: FIREBASE_PROJECT_ID,
+        clientEmail: FIREBASE_CLIENT_EMAIL,
+        privateKey: FIREBASE_PRIVATE_KEY
+      })
+    });
+  }
+
+  firestore = admin.firestore();
+  identityCollection = firestore.collection('identity_map');
+  restrictionCollection = firestore.collection('restriction_map');
+  console.log('Firestore enabled');
+}
 
 async function ensureDataDir() {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -63,9 +94,42 @@ async function saveMapToFile(filePath, sourceMap) {
   }
 }
 
+async function loadMapFromFirestore(collectionRef, targetMap) {
+  if (!collectionRef) return;
+
+  try {
+    const snapshot = await collectionRef.get();
+    if (!snapshot.empty) {
+      targetMap.clear();
+      snapshot.forEach(doc => {
+        targetMap.set(doc.id, doc.data());
+      });
+    }
+  } catch (error) {
+    console.error('loadMapFromFirestore error:', error);
+  }
+}
+
+async function saveRecordToFirestore(collectionRef, key, value) {
+  if (!collectionRef || !key) return;
+
+  try {
+    await collectionRef.doc(key).set(value);
+  } catch (error) {
+    console.error(`saveRecordToFirestore error (${key}):`, error);
+  }
+}
+
 async function bootstrapData() {
+  initFirestore();
+
   await loadMapFromFile(IDENTITY_FILE, identityMap);
   await loadMapFromFile(RESTRICTION_FILE, restrictionMap);
+
+  if (firestore) {
+    await loadMapFromFirestore(identityCollection, identityMap);
+    await loadMapFromFirestore(restrictionCollection, restrictionMap);
+  }
 }
 
 function now() {
@@ -112,14 +176,17 @@ app.post('/api/imweb/collect-identity', async (req, res) => {
 
     const prev = identityMap.get(memberHash);
 
-    identityMap.set(memberHash, {
+    const savedIdentity = {
       memberHash,
       memberUid: memberUid || prev?.memberUid || '',
       firstSeenAt: prev?.firstSeenAt || now(),
       lastSeenAt: now()
-    });
+    };
+
+    identityMap.set(memberHash, savedIdentity);
 
     await saveMapToFile(IDENTITY_FILE, identityMap);
+    await saveRecordToFirestore(identityCollection, memberHash, savedIdentity);
 
     return res.json({
       ok: true,
@@ -194,13 +261,17 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
 
     if (memberHash) {
       restrictionMap.set(memberHash, record);
+      await saveRecordToFirestore(restrictionCollection, memberHash, record);
     }
 
     if (memberUid) {
-      restrictionMap.set(makeUidKey(memberUid), {
+      const uidRecord = {
         ...record,
         memberUid
-      });
+      };
+      const uidDocKey = makeUidKey(memberUid);
+      restrictionMap.set(uidDocKey, uidRecord);
+      await saveRecordToFirestore(restrictionCollection, uidDocKey, uidRecord);
     }
 
     await saveMapToFile(RESTRICTION_FILE, restrictionMap);
