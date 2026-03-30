@@ -146,7 +146,9 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
       reason,
       blockPurchase,
       blockPickup,
-      isActive
+      isActive,
+      releaseReason,
+      adminMemo
     } = req.body || {};
 
     if (adminSecret !== process.env.ADMIN_SECRET) {
@@ -163,14 +165,31 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
       });
     }
 
+    const nowTs = now();
+    const hashKey = memberHash || '';
+    const uidKey = memberUid ? makeUidKey(memberUid) : '';
+
+    const existingByHash = hashKey && restrictionMap.has(hashKey)
+      ? restrictionMap.get(hashKey)
+      : null;
+    const existingByUid = uidKey && restrictionMap.has(uidKey)
+      ? restrictionMap.get(uidKey)
+      : null;
+    const existing = existingByHash || existingByUid;
+
     const record = {
-      memberHash: memberHash || '',
-      memberUid: memberUid || '',
-      reason: reason || '',
+      memberHash: memberHash || existing?.memberHash || '',
+      memberUid: memberUid || existing?.memberUid || '',
+      reason: reason || existing?.reason || '',
+      releaseReason: releaseReason || '',
+      adminMemo: adminMemo || existing?.adminMemo || '',
       blockPurchase: !!blockPurchase,
       blockPickup: !!blockPickup,
       isActive: isActive !== false,
-      updatedAt: now()
+      createdAt: existing?.createdAt || nowTs,
+      updatedAt: nowTs,
+      releasedAt: isActive === false ? nowTs : null,
+      lastAction: isActive === false ? 'released' : 'restricted'
     };
 
     if (memberHash) {
@@ -178,14 +197,28 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
     }
 
     if (memberUid) {
-      restrictionMap.set(makeUidKey(memberUid), record);
+      restrictionMap.set(makeUidKey(memberUid), {
+        ...record,
+        memberUid
+      });
     }
 
     await saveMapToFile(RESTRICTION_FILE, restrictionMap);
 
     return res.json({
       ok: true,
-      saved: record
+      memberHash: record.memberHash,
+      memberUid: record.memberUid,
+      reason: record.reason,
+      releaseReason: record.releaseReason,
+      adminMemo: record.adminMemo,
+      blockPurchase: record.blockPurchase,
+      blockPickup: record.blockPickup,
+      isActive: record.isActive,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      releasedAt: record.releasedAt,
+      lastAction: record.lastAction
     });
   } catch (error) {
     console.error('set-restriction error:', error);

@@ -1,5 +1,3 @@
-
-
 <!doctype html>
 <html lang="ko">
 <head>
@@ -78,6 +76,95 @@
       color: #bbb;
     }
 
+    .status {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 14px;
+      display: none;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .status.success {
+      background: rgba(46, 160, 67, 0.18);
+      border: 1px solid rgba(46, 160, 67, 0.45);
+      color: #b7f5c0;
+    }
+
+    .status.error {
+      background: rgba(248, 81, 73, 0.18);
+      border: 1px solid rgba(248, 81, 73, 0.45);
+      color: #ffb3ad;
+    }
+
+    .section-title {
+      margin-top: 18px;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: #bbb;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .tag-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid #444;
+      color: #ddd;
+      background: #202020;
+    }
+
+    .list-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .ghost-btn {
+      background: #151515;
+    }
+    .danger-btn {
+      background: rgba(248, 81, 73, 0.14);
+      border: 1px solid rgba(248, 81, 73, 0.45);
+      color: #ffb3ad;
+    }
+
+    .danger-btn:hover {
+      background: rgba(248, 81, 73, 0.22);
+    }
+
+    .helper-box {
+      margin-bottom: 14px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #333;
+      background: #151515;
+      color: #cfcfcf;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .quick-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+      margin-bottom: 8px;
+    }
+
     @media (max-width: 900px) {
       .row {
         grid-template-columns: 1fr;
@@ -99,16 +186,20 @@
       <button id="searchBtn">검색</button>
       <button id="loadBtn">전체 불러오기</button>
     </div>
+    <div id="statusMessage" class="status"></div>
   </div>
 
   <div class="row">
     <div class="card">
       <h2>제한 등록 / 수정</h2>
+      <div class="helper-box">
+        memberUid(이메일)만으로도 저장 가능합니다. 가장 안정적인 방식은 검색 결과에서 회원 정보를 불러와 저장하는 것입니다.
+      </div>
 
-      <label>memberHash</label>
+      <label>memberHash <span class="small">(선택사항)</span></label>
       <input id="memberHash" type="text" placeholder="해시 입력" />
 
-      <label>memberUid</label>
+      <label>memberUid <span class="small">(이메일만으로도 저장 가능)</span></label>
       <input id="memberUid" type="text" placeholder="이메일 입력" />
 
       <label>사유</label>
@@ -118,6 +209,12 @@
       <label><input id="blockPickup" type="checkbox" style="width:auto; margin-right:8px;" /> 방문수령 제한</label>
       <label><input id="isActive" type="checkbox" style="width:auto; margin-right:8px;" checked /> 활성화</label>
 
+      <div class="quick-actions">
+        <button id="presetPurchaseOnly" type="button">구매만 제한</button>
+        <button id="presetPickupOnly" type="button">방문수령만 제한</button>
+        <button id="presetBoth" type="button">둘 다 제한</button>
+      </div>
+
       <div class="actions">
         <button id="saveBtn">저장</button>
         <button id="clearBtn">입력 초기화</button>
@@ -126,7 +223,7 @@
 
     <div class="card">
       <h2>검색 결과</h2>
-      <div id="results" class="small muted">아직 데이터 없음</div>
+      <div id="results" class="small muted">관리자 비밀번호 입력 후 전체 불러오기 또는 검색을 눌러주세요.</div>
     </div>
   </div>
 
@@ -141,16 +238,41 @@
       return el('adminSecret').value.trim();
     }
 
-    function fillForm(item) {
-      el('memberHash').value = item.memberHash || '';
-      el('memberUid').value = item.memberUid || '';
-      el('reason').value = item.reason || '';
-      el('blockPurchase').checked = !!item.blockPurchase;
-      el('blockPickup').checked = !!item.blockPickup;
-      el('isActive').checked = item.isActive !== false;
+    function showStatus(message, type = 'success') {
+      const status = el('statusMessage');
+      status.textContent = message;
+      status.className = `status show ${type}`;
+    }
+
+    function clearStatus() {
+      const status = el('statusMessage');
+      status.textContent = '';
+      status.className = 'status';
+    }
+
+    function formatDateTime(value) {
+      if (!value) return '-';
+
+      const date = new Date(Number(value));
+      if (Number.isNaN(date.getTime())) return String(value);
+
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const dd = String(date.getDate()).padStart(2, '0');
+      const hh = String(date.getHours()).padStart(2, '0');
+      const mi = String(date.getMinutes()).padStart(2, '0');
+
+      return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
     }
 
     async function loadAll() {
+      clearStatus();
+
+      if (!getSecret()) {
+        showStatus('관리자 비밀번호를 먼저 입력해 주세요.', 'error');
+        return;
+      }
+
       const res = await fetch(API_BASE + '/api/imweb/admin/list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -158,9 +280,22 @@
       });
       const data = await res.json();
       renderResults(data);
+
+      if (!data.ok) {
+        showStatus('전체 조회 실패: 관리자 비밀번호를 확인해 주세요.', 'error');
+      } else {
+        showStatus('전체 목록을 불러왔습니다.', 'success');
+      }
     }
 
     async function search() {
+      clearStatus();
+
+      if (!getSecret()) {
+        showStatus('관리자 비밀번호를 먼저 입력해 주세요.', 'error');
+        return;
+      }
+
       const res = await fetch(API_BASE + '/api/imweb/admin/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -171,25 +306,66 @@
       });
       const data = await res.json();
       renderResults(data);
+
+      if (!data.ok) {
+        showStatus('검색 실패: 관리자 비밀번호를 확인해 주세요.', 'error');
+      } else {
+        showStatus('검색을 완료했습니다.', 'success');
+      }
     }
 
     async function saveRestriction() {
+      clearStatus();
+
+      const memberHash = el('memberHash').value.trim();
+      const memberUid = el('memberUid').value.trim();
+      const reason = el('reason').value.trim();
+
+      if (!getSecret()) {
+        showStatus('관리자 비밀번호를 먼저 입력해 주세요.', 'error');
+        return;
+      }
+
+      if (!memberHash && !memberUid) {
+        showStatus('memberHash 또는 memberUid(이메일) 중 하나는 입력해야 합니다.', 'error');
+        return;
+      }
+
+      if (!reason) {
+        showStatus('사유를 입력해 주세요.', 'error');
+        return;
+      }
+
       const res = await fetch(API_BASE + '/api/imweb/set-restriction', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           adminSecret: getSecret(),
-          memberHash: el('memberHash').value.trim(),
-          memberUid: el('memberUid').value.trim(),
-          reason: el('reason').value.trim(),
+          memberHash,
+          memberUid,
+          reason,
           blockPurchase: el('blockPurchase').checked,
           blockPickup: el('blockPickup').checked,
           isActive: el('isActive').checked
         })
       });
       const data = await res.json();
-      alert(data.ok ? '저장 완료' : '저장 실패');
-      if (data.ok) loadAll();
+
+      if (data.ok) {
+        showStatus('제한 정보를 저장했습니다.', 'success');
+        loadAll();
+      } else {
+        showStatus('저장 실패: 관리자 비밀번호를 확인해 주세요.', 'error');
+      }
+    }
+
+    function fillForm(item) {
+      el('memberHash').value = item.memberHash || '';
+      el('memberUid').value = item.memberUid || '';
+      el('reason').value = item.reason || '';
+      el('blockPurchase').checked = !!item.blockPurchase;
+      el('blockPickup').checked = !!item.blockPickup;
+      el('isActive').checked = item.isActive !== false;
     }
 
     function renderResults(data) {
@@ -200,28 +376,80 @@
         return;
       }
 
-      const identities = data.identities || [];
       const restrictions = data.restrictions || [];
 
       root.innerHTML = `
-        <div class="small">identities: ${identities.length} / restrictions: ${restrictions.length}</div>
-        ${restrictions.map(item => `
+        <div class="small">제한 목록: ${restrictions.length}건</div>
+        <div class="section-title">Restrictions</div>
+        ${restrictions.length ? restrictions.map(item => `
           <div class="list-item">
             <div><strong>${item.memberUid || '(uid 없음)'}</strong></div>
-            <div class="small">${item.memberHash || ''}</div>
-            <div class="small">구매제한: ${!!item.blockPurchase} / 방문수령제한: ${!!item.blockPickup}</div>
-            <div class="small">사유: ${item.reason || ''}</div>
-            <button type="button" onclick='window.__fill(${JSON.stringify(item)})'>불러오기</button>
+            <div class="small" style="margin-top:8px;">사유: ${item.reason || ''}</div>
+            <div class="tag-row">
+              <span class="tag">구매제한: ${!!item.blockPurchase}</span>
+              <span class="tag">방문수령제한: ${!!item.blockPickup}</span>
+              <span class="tag">활성화: ${item.isActive !== false}</span>
+            </div>
+            <div class="small" style="margin-top:8px;">memberHash: ${item.memberHash || ''}</div>
+            <div class="list-actions">
+              <button type="button" onclick='window.__fill(${JSON.stringify(item)})'>불러오기</button>
+              <button type="button" class="danger-btn" onclick='window.__release(${JSON.stringify({ memberHash: item.memberHash || '', memberUid: item.memberUid || '' })})'>제한 해제</button>
+            </div>
           </div>
-        `).join('')}
+        `).join('') : '<div class="small muted">등록된 제한 없음</div>'}
       `;
+
+    }
+
+    async function releaseRestriction(target) {
+      clearStatus();
+
+      const res = await fetch(API_BASE + '/api/imweb/set-restriction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminSecret: getSecret(),
+          memberHash: target.memberHash || '',
+          memberUid: target.memberUid || '',
+          reason: '관리자 해제',
+          blockPurchase: false,
+          blockPickup: false,
+          isActive: false
+        })
+      });
+
+      const data = await res.json();
+
+      if (data.ok) {
+        showStatus('제한을 해제했습니다.', 'success');
+        loadAll();
+      } else {
+        showStatus('제한 해제 실패: 관리자 비밀번호를 확인해 주세요.', 'error');
+      }
     }
 
     window.__fill = fillForm;
+    window.__release = releaseRestriction;
 
     el('searchBtn').addEventListener('click', search);
     el('loadBtn').addEventListener('click', loadAll);
     el('saveBtn').addEventListener('click', saveRestriction);
+
+    el('presetPurchaseOnly').addEventListener('click', () => {
+      el('blockPurchase').checked = true;
+      el('blockPickup').checked = false;
+    });
+
+    el('presetPickupOnly').addEventListener('click', () => {
+      el('blockPurchase').checked = false;
+      el('blockPickup').checked = true;
+    });
+
+    el('presetBoth').addEventListener('click', () => {
+      el('blockPurchase').checked = true;
+      el('blockPickup').checked = true;
+    });
+
     el('clearBtn').addEventListener('click', () => {
       fillForm({
         memberHash: '',
@@ -231,6 +459,13 @@
         blockPickup: false,
         isActive: true
       });
+    });
+
+    el('searchKeyword').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        search();
+      }
     });
   </script>
 </body>
