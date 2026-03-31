@@ -126,6 +126,36 @@
       background: #202020;
     }
 
+    .tag.active {
+      border-color: rgba(46, 160, 67, 0.45);
+      background: rgba(46, 160, 67, 0.16);
+      color: #b7f5c0;
+    }
+
+    .tag.inactive {
+      border-color: rgba(248, 81, 73, 0.45);
+      background: rgba(248, 81, 73, 0.14);
+      color: #ffb3ad;
+    }
+
+    .tag.warn {
+      border-color: rgba(251, 188, 4, 0.45);
+      background: rgba(251, 188, 4, 0.14);
+      color: #ffe08a;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 12px;
+      margin-top: 10px;
+    }
+
+    .meta-item {
+      font-size: 12px;
+      color: #bbb;
+    }
+
     .list-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -207,12 +237,14 @@
 
       <label><input id="blockPurchase" type="checkbox" style="width:auto; margin-right:8px;" /> 구매 제한</label>
       <label><input id="blockPickup" type="checkbox" style="width:auto; margin-right:8px;" /> 방문수령 제한</label>
+      <label><input id="warningOnly" type="checkbox" style="width:auto; margin-right:8px;" /> 경고만 표시 (차단 없음)</label>
       <label><input id="isActive" type="checkbox" style="width:auto; margin-right:8px;" checked /> 활성화</label>
 
       <div class="quick-actions">
         <button id="presetPurchaseOnly" type="button">구매만 제한</button>
         <button id="presetPickupOnly" type="button">방문수령만 제한</button>
         <button id="presetBoth" type="button">둘 다 제한</button>
+        <button id="presetWarningOnly" type="button">경고만 표시</button>
       </div>
 
       <div class="actions">
@@ -263,6 +295,16 @@
       const mi = String(date.getMinutes()).padStart(2, '0');
 
       return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+    }
+
+    function statusTag(label, kind) {
+      return `<span class="tag ${kind}">${label}</span>`;
+    }
+
+    function getStatusLabel(item) {
+      if (item.warningOnly) return statusTag('⚠ 경고', 'warn');
+      if (item.isActive === false) return statusTag('해제됨', 'inactive');
+      return statusTag('제한중', 'active');
     }
 
     async function loadAll() {
@@ -320,6 +362,7 @@
       const memberHash = el('memberHash').value.trim();
       const memberUid = el('memberUid').value.trim();
       const reason = el('reason').value.trim();
+      const warningOnly = el('warningOnly').checked;
 
       if (!getSecret()) {
         showStatus('관리자 비밀번호를 먼저 입력해 주세요.', 'error');
@@ -344,8 +387,9 @@
           memberHash,
           memberUid,
           reason,
-          blockPurchase: el('blockPurchase').checked,
-          blockPickup: el('blockPickup').checked,
+          blockPurchase: warningOnly ? false : el('blockPurchase').checked,
+          blockPickup: warningOnly ? false : el('blockPickup').checked,
+          warningOnly,
           isActive: el('isActive').checked
         })
       });
@@ -365,6 +409,7 @@
       el('reason').value = item.reason || '';
       el('blockPurchase').checked = !!item.blockPurchase;
       el('blockPickup').checked = !!item.blockPickup;
+      el('warningOnly').checked = !!item.warningOnly;
       el('isActive').checked = item.isActive !== false;
     }
 
@@ -384,13 +429,19 @@
         ${restrictions.length ? restrictions.map(item => `
           <div class="list-item">
             <div><strong>${item.memberUid || '(uid 없음)'}</strong></div>
-            <div class="small" style="margin-top:8px;">사유: ${item.reason || ''}</div>
+            <div class="small" style="margin-top:8px;">사유: ${item.reason || '-'}</div>
             <div class="tag-row">
-              <span class="tag">구매제한: ${!!item.blockPurchase}</span>
-              <span class="tag">방문수령제한: ${!!item.blockPickup}</span>
-              <span class="tag">활성화: ${item.isActive !== false}</span>
+              ${getStatusLabel(item)}
+              ${item.warningOnly ? statusTag('⚠ 경고만 표시', 'warn') : statusTag(item.blockPurchase ? '✓ 구매 제한' : '－ 구매 제한 없음', item.blockPurchase ? 'active' : 'inactive')}
+              ${item.warningOnly ? statusTag('⚠ 차단 없음', 'warn') : statusTag(item.blockPickup ? '✓ 방문수령 제한' : '－ 방문수령 제한 없음', item.blockPickup ? 'active' : 'inactive')}
+              ${statusTag(item.isActive !== false ? '✓ 활성' : '✕ 비활성', item.isActive !== false ? 'active' : 'inactive')}
             </div>
-            <div class="small" style="margin-top:8px;">memberHash: ${item.memberHash || ''}</div>
+            <div class="meta-grid">
+              <div class="meta-item">등록일: ${formatDateTime(item.createdAt)}</div>
+              <div class="meta-item">수정일: ${formatDateTime(item.updatedAt)}</div>
+              <div class="meta-item">해제일: ${formatDateTime(item.releasedAt)}</div>
+              <div class="meta-item">memberHash: ${item.memberHash || '-'}</div>
+            </div>
             <div class="list-actions">
               <button type="button" onclick='window.__fill(${JSON.stringify(item)})'>불러오기</button>
               <button type="button" class="danger-btn" onclick='window.__release(${JSON.stringify({ memberHash: item.memberHash || '', memberUid: item.memberUid || '' })})'>제한 해제</button>
@@ -414,6 +465,7 @@
           reason: '관리자 해제',
           blockPurchase: false,
           blockPickup: false,
+          warningOnly: false,
           isActive: false
         })
       });
@@ -438,16 +490,26 @@
     el('presetPurchaseOnly').addEventListener('click', () => {
       el('blockPurchase').checked = true;
       el('blockPickup').checked = false;
+      el('warningOnly').checked = false;
     });
 
     el('presetPickupOnly').addEventListener('click', () => {
       el('blockPurchase').checked = false;
       el('blockPickup').checked = true;
+      el('warningOnly').checked = false;
     });
 
     el('presetBoth').addEventListener('click', () => {
       el('blockPurchase').checked = true;
       el('blockPickup').checked = true;
+      el('warningOnly').checked = false;
+    });
+
+    el('presetWarningOnly').addEventListener('click', () => {
+      el('blockPurchase').checked = false;
+      el('blockPickup').checked = false;
+      el('warningOnly').checked = true;
+      el('isActive').checked = true;
     });
 
     el('clearBtn').addEventListener('click', () => {
@@ -457,6 +519,7 @@
         reason: '',
         blockPurchase: false,
         blockPickup: false,
+        warningOnly: false,
         isActive: true
       });
     });
