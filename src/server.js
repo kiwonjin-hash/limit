@@ -213,10 +213,10 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
       reason,
       blockPurchase,
       blockPickup,
+      warningOnly,
       isActive,
       releaseReason,
-      adminMemo,
-      warningOnly
+      adminMemo
     } = req.body || {};
 
     if (adminSecret !== process.env.ADMIN_SECRET) {
@@ -245,15 +245,17 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
       : null;
     const existing = existingByHash || existingByUid;
 
+    const isWarningOnly = !!warningOnly;
+
     const record = {
       memberHash: memberHash || existing?.memberHash || '',
       memberUid: memberUid || existing?.memberUid || '',
       reason: reason || existing?.reason || '',
       releaseReason: releaseReason || '',
       adminMemo: adminMemo || existing?.adminMemo || '',
-      warningOnly: !!warningOnly,
-      blockPurchase: !!warningOnly ? false : !!blockPurchase,
-      blockPickup: !!warningOnly ? false : !!blockPickup,
+      warningOnly: isWarningOnly,
+      blockPurchase: isWarningOnly ? false : !!blockPurchase,
+      blockPickup: isWarningOnly ? false : !!blockPickup,
       isActive: isActive !== false,
       createdAt: existing?.createdAt || nowTs,
       updatedAt: nowTs,
@@ -323,18 +325,20 @@ app.post('/api/imweb/check-restriction', (req, res) => {
     if (!found || found.isActive === false) {
       return res.json({
         blocked: false,
+        warningOnly: false,
         blockPurchase: false,
         blockPickup: false,
-        warningOnly: false,
         reason: ''
       });
     }
 
+    const isWarningOnly = !!found.warningOnly;
+
     return res.json({
-      blocked: !!(found.blockPurchase || found.blockPickup || found.warningOnly),
-      blockPurchase: !!found.blockPurchase,
-      blockPickup: !!found.blockPickup,
-      warningOnly: !!found.warningOnly,
+      blocked: isWarningOnly ? false : !!(found.blockPurchase || found.blockPickup),
+      warningOnly: isWarningOnly,
+      blockPurchase: isWarningOnly ? false : !!found.blockPurchase,
+      blockPickup: isWarningOnly ? false : !!found.blockPickup,
       reason: found.reason || ''
     });
   } catch (error) {
