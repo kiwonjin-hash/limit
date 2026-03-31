@@ -122,9 +122,9 @@
         font-size: 14px;
       }
       .restriction-top-notice.warning-only {
-        background: #fff3cd;
-        color: #856404;
-        border-bottom: 1px solid #ffc107;
+        background: #111;
+        color: #fff;
+        border-bottom: 1px solid rgba(255,255,255,0.12);
       }
       .restriction-modal-backdrop {
         position: fixed;
@@ -271,7 +271,7 @@
       topNotice.className = 'restriction-top-notice warning-only';
       document.body.prepend(topNotice);
     }
-    topNotice.innerHTML = `<strong>⚠ ${message.title}</strong><div>${message.body}</div>`;
+    topNotice.innerHTML = `<strong>${message.title}</strong><div>${message.body}</div>`;
   }
 
   function forceNormalShippingSelection() {
