@@ -215,7 +215,8 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
       blockPickup,
       isActive,
       releaseReason,
-      adminMemo
+      adminMemo,
+      warningOnly
     } = req.body || {};
 
     if (adminSecret !== process.env.ADMIN_SECRET) {
@@ -250,8 +251,9 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
       reason: reason || existing?.reason || '',
       releaseReason: releaseReason || '',
       adminMemo: adminMemo || existing?.adminMemo || '',
-      blockPurchase: !!blockPurchase,
-      blockPickup: !!blockPickup,
+      warningOnly: !!warningOnly,
+      blockPurchase: !!warningOnly ? false : !!blockPurchase,
+      blockPickup: !!warningOnly ? false : !!blockPickup,
       isActive: isActive !== false,
       createdAt: existing?.createdAt || nowTs,
       updatedAt: nowTs,
@@ -283,6 +285,7 @@ app.post('/api/imweb/set-restriction', async (req, res) => {
       reason: record.reason,
       releaseReason: record.releaseReason,
       adminMemo: record.adminMemo,
+      warningOnly: record.warningOnly,
       blockPurchase: record.blockPurchase,
       blockPickup: record.blockPickup,
       isActive: record.isActive,
@@ -322,14 +325,16 @@ app.post('/api/imweb/check-restriction', (req, res) => {
         blocked: false,
         blockPurchase: false,
         blockPickup: false,
+        warningOnly: false,
         reason: ''
       });
     }
 
     return res.json({
-      blocked: !!(found.blockPurchase || found.blockPickup),
+      blocked: !!(found.blockPurchase || found.blockPickup || found.warningOnly),
       blockPurchase: !!found.blockPurchase,
       blockPickup: !!found.blockPickup,
+      warningOnly: !!found.warningOnly,
       reason: found.reason || ''
     });
   } catch (error) {
